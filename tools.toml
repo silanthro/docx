@@ -1,0 +1,8 @@
+[index]
+
+description = "Tools for reading and writing .docx files"
+
+tools = [
+    "docx_tools.read_docx",
+    "docx_tools.write_docx",
+]

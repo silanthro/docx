@@ -1,0 +1,9 @@
+[project]
+name = "docx"
+version = "0.1.0"
+description = "Tools for reading and writing .docx files"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-docx>=1.1.2",
+]
