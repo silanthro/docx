@@ -89,21 +89,55 @@ def read_docx(path: str) -> DocData:
     """
     Read a .docx file and extract content with formatting details.
     Excludes any style or formatting fields that are default (i.e., None or Normal).
-    Returns a list of paragraphs or headings, each including minimal style info.
+    Returns a list of paragraphs, headings or tables, each including minimal style info.
 
     Args:
     - path (str): Path to docx file
 
     Returns:
-        A list of dictionaries representing paragraphs or headings
+        A list of dictionaries, where each dictionary represents either a paragraph, heading, or a table
 
     """
     _path_is_allowed(path)
     doc = Document(path)
     content = []
 
-    for para in doc.paragraphs:
-        # Filter paragraph-level formatting
+    def extract_run_formatting(run) -> dict:
+        font = run.font
+        run_data = {"text": run.text}
+
+        if font.bold:
+            run_data["bold"] = True
+        if font.italic:
+            run_data["italic"] = True
+        if font.underline:
+            run_data["underline"] = font.underline
+        if font.strike:
+            run_data["strikethrough"] = True
+        if font.double_strike:
+            run_data["double_strike"] = True
+        if font.superscript:
+            run_data["superscript"] = True
+        if font.subscript:
+            run_data["subscript"] = True
+        if font.name:
+            run_data["font_name"] = font.name
+        if font.size:
+            run_data["font_size"] = font.size.pt
+        if font.color and font.color.rgb:
+            run_data["font_color"] = str(font.color.rgb)
+        if font.highlight_color:
+            run_data["highlight"] = font.highlight_color.name
+        if font.all_caps:
+            run_data["all_caps"] = True
+        if font.small_caps:
+            run_data["small_caps"] = True
+        if font.hidden:
+            run_data["hidden"] = True
+
+        return run_data
+
+    def extract_paragraph_formatting(para) -> dict:
         para_data = {}
         if para.style.name != "Normal":
             para_data["style"] = para.style.name
@@ -120,45 +154,82 @@ def read_docx(path: str) -> DocData:
         if fmt.line_spacing:
             para_data["line_spacing"] = fmt.line_spacing
 
-        # Collect runs
-        runs_data = []
-        for run in para.runs:
-            font = run.font
-            run_data = {"text": run.text}
-
-            if font.bold:
-                run_data["bold"] = True
-            if font.italic:
-                run_data["italic"] = True
-            if font.underline:
-                run_data["underline"] = font.underline
-            if font.strike:
-                run_data["strikethrough"] = True
-            if font.double_strike:
-                run_data["double_strike"] = True
-            if font.superscript:
-                run_data["superscript"] = True
-            if font.subscript:
-                run_data["subscript"] = True
-            if font.name:
-                run_data["font_name"] = font.name
-            if font.size:
-                run_data["font_size"] = font.size.pt
-            if font.color and font.color.rgb:
-                run_data["font_color"] = str(font.color.rgb)
-            if font.highlight_color:
-                run_data["highlight"] = font.highlight_color.name
-            if font.all_caps:
-                run_data["all_caps"] = True
-            if font.small_caps:
-                run_data["small_caps"] = True
-            if font.hidden:
-                run_data["hidden"] = True
-
-            runs_data.append(run_data)
-
+        runs_data = [extract_run_formatting(run) for run in para.runs]
         para_data["runs"] = runs_data
-        content.append(para_data)
+        return para_data
+
+    # Process document content
+    for element in doc.element.body:
+        if element.tag.endswith('tbl'):  # Table
+            table_obj = None
+            # Map the XML node back to its python-docx Table, so we can use table_obj.rows, table_obj.cell(), etc.
+            for t in doc.tables:
+                if t._element is element:
+                    table_obj = t
+                    break
+            
+            if table_obj:
+                table = {
+                    "type": "table",
+                    "rows": []
+                }
+                
+                # Process table cells
+                vertical_merges = {}  # Track vertical merges
+                
+                for row_idx, row in enumerate(table_obj.rows):
+                    table_row = []
+                    col_offset = 0
+                    
+                    for col_idx, cell in enumerate(row.cells):
+                        # Get cell spans
+                        tc = cell._tc
+                        grid_span = tc.tcPr.xpath('./w:gridSpan') # Horizontal merge
+                        v_merge = tc.tcPr.xpath('./w:vMerge') # Vertical merge
+                        
+                        # Calculate actual column index accounting for previous spans
+                        actual_col = col_idx + col_offset
+                        
+                        # Extract cell content
+                        cell_data = {"paragraphs": []}
+                        for para in cell.paragraphs:
+                            cell_data["paragraphs"].append(extract_paragraph_formatting(para))
+                        
+                        # Handle horizontal merge (gridSpan)
+                        h_span = 1
+                        if grid_span:
+                            h_span = int(grid_span[0].val)
+                            col_offset += h_span - 1
+                        
+                        # Handle vertical merge (vMerge)
+                        if v_merge:
+                            merge_val = v_merge[0].val
+                            if merge_val == "restart":
+                                # Start of vertical merge
+                                vertical_merges[(row_idx, actual_col)] = cell_data
+                            elif not merge_val and (row_idx - 1, actual_col) in vertical_merges:
+                                # Reuse the cell data from the previous row
+                                cell_data = vertical_merges[(row_idx - 1, actual_col)]
+                                vertical_merges[(row_idx, actual_col)] = cell_data
+                        
+                        # Add the cell data h_span times
+                        for _ in range(h_span):
+                            table_row.append(cell_data)
+                    
+                    table["rows"].append(table_row)
+                
+                content.append(table)
+                    
+        elif element.tag.endswith('p'):  # Paragraph, heading, or title
+            para = None
+            for p in doc.paragraphs:
+                if p._element is element:
+                    para = p
+                    break
+            if para:
+                para_data = extract_paragraph_formatting(para)
+                para_data["type"] = "paragraph"
+                content.append(para_data)
 
     return content
 
