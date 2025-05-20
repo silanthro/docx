@@ -92,7 +92,7 @@ def read_docx(path: str) -> DocData:
     Returns a list of paragraphs, headings or tables, each including minimal style info.
 
     Args:
-    - path (str): Path to docx file
+    - path (str): Absolute path to docx file
 
     Returns:
         A list of dictionaries, where each dictionary represents either a paragraph, heading, or a table
@@ -160,67 +160,69 @@ def read_docx(path: str) -> DocData:
 
     # Process document content
     for element in doc.element.body:
-        if element.tag.endswith('tbl'):  # Table
+        if element.tag.endswith("tbl"):  # Table
             table_obj = None
             # Map the XML node back to its python-docx Table, so we can use table_obj.rows, table_obj.cell(), etc.
             for t in doc.tables:
                 if t._element is element:
                     table_obj = t
                     break
-            
+
             if table_obj:
-                table = {
-                    "type": "table",
-                    "rows": []
-                }
-                
+                table = {"type": "table", "rows": []}
+
                 # Process table cells
                 vertical_merges = {}  # Track vertical merges
-                
+
                 for row_idx, row in enumerate(table_obj.rows):
                     table_row = []
                     col_offset = 0
-                    
+
                     for col_idx, cell in enumerate(row.cells):
                         # Get cell spans
                         tc = cell._tc
-                        grid_span = tc.tcPr.xpath('./w:gridSpan') # Horizontal merge
-                        v_merge = tc.tcPr.xpath('./w:vMerge') # Vertical merge
-                        
+                        grid_span = tc.tcPr.xpath("./w:gridSpan")  # Horizontal merge
+                        v_merge = tc.tcPr.xpath("./w:vMerge")  # Vertical merge
+
                         # Calculate actual column index accounting for previous spans
                         actual_col = col_idx + col_offset
-                        
+
                         # Extract cell content
                         cell_data = {"paragraphs": []}
                         for para in cell.paragraphs:
-                            cell_data["paragraphs"].append(extract_paragraph_formatting(para))
-                        
+                            cell_data["paragraphs"].append(
+                                extract_paragraph_formatting(para)
+                            )
+
                         # Handle horizontal merge (gridSpan)
                         h_span = 1
                         if grid_span:
                             h_span = int(grid_span[0].val)
                             col_offset += h_span - 1
-                        
+
                         # Handle vertical merge (vMerge)
                         if v_merge:
                             merge_val = v_merge[0].val
                             if merge_val == "restart":
                                 # Start of vertical merge
                                 vertical_merges[(row_idx, actual_col)] = cell_data
-                            elif not merge_val and (row_idx - 1, actual_col) in vertical_merges:
+                            elif (
+                                not merge_val
+                                and (row_idx - 1, actual_col) in vertical_merges
+                            ):
                                 # Reuse the cell data from the previous row
                                 cell_data = vertical_merges[(row_idx - 1, actual_col)]
                                 vertical_merges[(row_idx, actual_col)] = cell_data
-                        
+
                         # Add the cell data h_span times
                         for _ in range(h_span):
                             table_row.append(cell_data)
-                    
+
                     table["rows"].append(table_row)
-                
+
                 content.append(table)
-                    
-        elif element.tag.endswith('p'):  # Paragraph, heading, or title
+
+        elif element.tag.endswith("p"):  # Paragraph, heading, or title
             para = None
             for p in doc.paragraphs:
                 if p._element is element:
@@ -240,7 +242,7 @@ def write_docx(data: DocData, output_path: str, overwrite: bool = False):
 
     Args:
     - data (list): List of dictionaries representing paragraphs or headings
-    - output_path (str): Path to save docx
+    - output_path (str): Absolute path to save docx
     - overwrite (bool): Whether to overwrite if output_path exists, defaults to False
 
     Returns:
